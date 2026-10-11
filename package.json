@@ -1,0 +1,15 @@
+{
+  "name": "smart-lead-dashboard",
+  "version": "1.0.0",
+  "description": "Smart Lead Dashboard CRM - Full-stack MERN & TypeScript Lead Management Platform",
+  "scripts": {
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:backend": "npm run build --prefix backend",
+    "build:frontend": "npm run build --prefix frontend",
+    "build": "npm run build --prefix backend && npm run build --prefix frontend"
+  },
+  "keywords": ["crm", "lead-management", "sales", "typescript", "react", "express", "mongodb"],
+  "author": "Sunil Jadhav",
+  "license": "ISC"
+}

@@ -1,13 +1,14 @@
 import axios from "axios";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+  import.meta.env.VITE_API_URL || "/api";
 
 const API = axios.create({
   baseURL: API_BASE_URL,
   headers: {
     "Content-Type": "application/json",
   },
+  timeout: 15000,
 });
 
 API.interceptors.request.use(
@@ -24,9 +25,13 @@ API.interceptors.request.use(
 API.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Only redirect if unauthorized and user is inside the dashboard
     if (error.response?.status === 401) {
-      // If token expired, clear and return
-      if (window.location.pathname !== "/") {
+      const isAuthRoute =
+        error.config?.url?.includes("/auth/login") ||
+        error.config?.url?.includes("/auth/register");
+
+      if (!isAuthRoute && window.location.pathname !== "/" && window.location.pathname !== "") {
         localStorage.removeItem("token");
         localStorage.removeItem("role");
         localStorage.removeItem("user");

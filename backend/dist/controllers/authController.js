@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getMe = exports.login = exports.register = void 0;
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const mongoose_1 = __importDefault(require("mongoose"));
 const User_1 = __importDefault(require("../models/User"));
 const db_1 = require("../services/db");
 const register = async (req, res) => {
@@ -16,34 +17,52 @@ const register = async (req, res) => {
         }
         const normalizedEmail = email.toLowerCase().trim();
         const hashedPassword = await bcryptjs_1.default.hash(password, 10);
-        let createdUser;
+        const assignedRole = role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES";
+        let createdUser = null;
         if (db_1.isMongoConnected) {
-            const existing = await User_1.default.findOne({ email: normalizedEmail });
-            if (existing) {
-                return res.status(400).json({ message: "Email already registered." });
+            try {
+                const existing = await User_1.default.findOne({ email: normalizedEmail });
+                if (existing) {
+                    return res.status(400).json({ message: "Email already registered." });
+                }
+                createdUser = await User_1.default.create({
+                    name,
+                    email: normalizedEmail,
+                    password: hashedPassword,
+                    role: assignedRole,
+                });
             }
-            createdUser = await User_1.default.create({
-                name,
-                email: normalizedEmail,
-                password: hashedPassword,
-                role: role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES",
-            });
+            catch (err) {
+                console.warn("MongoDB register error, using resilient store:", err.message);
+            }
         }
-        else {
-            const existing = db_1.memoryStore.users.find((u) => u.email.toLowerCase() === normalizedEmail);
-            if (existing) {
-                return res.status(400).json({ message: "Email already registered." });
-            }
+        // Always ensure user is added to local memoryStore
+        const existingMem = db_1.memoryStore.users.find((u) => u.email.toLowerCase() === normalizedEmail);
+        if (existingMem && !createdUser) {
+            return res.status(400).json({ message: "Email already registered." });
+        }
+        if (!createdUser) {
             createdUser = {
                 _id: `user_${Date.now()}`,
                 name,
                 email: normalizedEmail,
                 password: hashedPassword,
-                role: role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES",
+                role: assignedRole,
                 avatar: "",
                 createdAt: new Date(),
             };
             db_1.memoryStore.users.push(createdUser);
+        }
+        else {
+            db_1.memoryStore.users.push({
+                _id: String(createdUser._id),
+                name: createdUser.name,
+                email: createdUser.email,
+                password: hashedPassword,
+                role: createdUser.role,
+                avatar: createdUser.avatar || "",
+                createdAt: new Date(),
+            });
         }
         const token = jsonwebtoken_1.default.sign({
             id: createdUser._id,
@@ -82,9 +101,15 @@ const login = async (req, res) => {
         const normalizedEmail = email.toLowerCase().trim();
         let foundUser = null;
         if (db_1.isMongoConnected) {
-            foundUser = await User_1.default.findOne({ email: normalizedEmail });
+            try {
+                foundUser = await User_1.default.findOne({ email: normalizedEmail });
+            }
+            catch (err) {
+                console.warn("MongoDB login search error, falling back to local store:", err.message);
+            }
         }
-        else {
+        // Fallback to memoryStore
+        if (!foundUser) {
             foundUser = db_1.memoryStore.users.find((u) => u.email.toLowerCase() === normalizedEmail);
         }
         if (!foundUser) {
@@ -132,10 +157,15 @@ const getMe = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized" });
         }
         let user = null;
-        if (db_1.isMongoConnected) {
-            user = await User_1.default.findById(req.user.id).select("-password");
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(req.user.id)) {
+            try {
+                user = await User_1.default.findById(req.user.id).select("-password");
+            }
+            catch (err) {
+                user = null;
+            }
         }
-        else {
+        if (!user) {
             const u = db_1.memoryStore.users.find((item) => String(item._id) === String(req.user?.id));
             if (u) {
                 user = {

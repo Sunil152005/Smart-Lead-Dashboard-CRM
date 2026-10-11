@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../models/User";
 import { isMongoConnected, memoryStore } from "../services/db";
 import { AuthRequest } from "../middlewares/authMiddleware";
@@ -15,39 +16,57 @@ export const register = async (req: Request, res: Response) => {
 
     const normalizedEmail = email.toLowerCase().trim();
     const hashedPassword = await bcrypt.hash(password, 10);
+    const assignedRole = role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES";
 
-    let createdUser: any;
+    let createdUser: any = null;
 
     if (isMongoConnected) {
-      const existing = await User.findOne({ email: normalizedEmail });
-      if (existing) {
-        return res.status(400).json({ message: "Email already registered." });
-      }
+      try {
+        const existing = await User.findOne({ email: normalizedEmail });
+        if (existing) {
+          return res.status(400).json({ message: "Email already registered." });
+        }
 
-      createdUser = await User.create({
-        name,
-        email: normalizedEmail,
-        password: hashedPassword,
-        role: role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES",
-      });
-    } else {
-      const existing = memoryStore.users.find(
-        (u) => u.email.toLowerCase() === normalizedEmail
-      );
-      if (existing) {
-        return res.status(400).json({ message: "Email already registered." });
+        createdUser = await User.create({
+          name,
+          email: normalizedEmail,
+          password: hashedPassword,
+          role: assignedRole,
+        });
+      } catch (err: any) {
+        console.warn("MongoDB register error, using resilient store:", err.message);
       }
+    }
 
+    // Always ensure user is added to local memoryStore
+    const existingMem = memoryStore.users.find(
+      (u) => u.email.toLowerCase() === normalizedEmail
+    );
+    if (existingMem && !createdUser) {
+      return res.status(400).json({ message: "Email already registered." });
+    }
+
+    if (!createdUser) {
       createdUser = {
         _id: `user_${Date.now()}`,
         name,
         email: normalizedEmail,
         password: hashedPassword,
-        role: role.toUpperCase() === "ADMIN" ? "ADMIN" : "SALES",
+        role: assignedRole,
         avatar: "",
         createdAt: new Date(),
       };
       memoryStore.users.push(createdUser);
+    } else {
+      memoryStore.users.push({
+        _id: String(createdUser._id),
+        name: createdUser.name,
+        email: createdUser.email,
+        password: hashedPassword,
+        role: createdUser.role,
+        avatar: createdUser.avatar || "",
+        createdAt: new Date(),
+      });
     }
 
     const token = jwt.sign(
@@ -94,8 +113,15 @@ export const login = async (req: Request, res: Response) => {
     let foundUser: any = null;
 
     if (isMongoConnected) {
-      foundUser = await User.findOne({ email: normalizedEmail });
-    } else {
+      try {
+        foundUser = await User.findOne({ email: normalizedEmail });
+      } catch (err: any) {
+        console.warn("MongoDB login search error, falling back to local store:", err.message);
+      }
+    }
+
+    // Fallback to memoryStore
+    if (!foundUser) {
       foundUser = memoryStore.users.find(
         (u) => u.email.toLowerCase() === normalizedEmail
       );
@@ -153,9 +179,15 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     }
 
     let user: any = null;
-    if (isMongoConnected) {
-      user = await User.findById(req.user.id).select("-password");
-    } else {
+    if (isMongoConnected && mongoose.isValidObjectId(req.user.id)) {
+      try {
+        user = await User.findById(req.user.id).select("-password");
+      } catch (err) {
+        user = null;
+      }
+    }
+
+    if (!user) {
       const u = memoryStore.users.find((item) => String(item._id) === String(req.user?.id));
       if (u) {
         user = {

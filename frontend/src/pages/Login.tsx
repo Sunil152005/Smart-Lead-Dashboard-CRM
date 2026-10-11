@@ -58,8 +58,10 @@ export const Login: React.FC = () => {
       }, 400);
     } catch (error: any) {
       console.error(error);
-      const msg =
-        error.response?.data?.message || "Authentication failed. Please check credentials.";
+      const isNetworkError = error.code === "ERR_NETWORK" || !error.response;
+      const msg = isNetworkError
+        ? "Unable to reach backend server. Please verify backend is running on port 5000."
+        : error.response?.data?.message || "Authentication failed. Please check credentials.";
       showToast(msg, "error");
     } finally {
       setLoading(false);
@@ -93,7 +95,11 @@ export const Login: React.FC = () => {
       }, 400);
     } catch (error: any) {
       console.error(error);
-      showToast("Failed to connect to backend demo server.", "error");
+      const isNetworkError = error.code === "ERR_NETWORK" || !error.response;
+      const msg = isNetworkError
+        ? "Cannot connect to backend server. Ensure backend is running on port 5000."
+        : error.response?.data?.message || "Demo login failed.";
+      showToast(msg, "error");
     } finally {
       setLoading(false);
     }

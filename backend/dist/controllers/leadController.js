@@ -4,9 +4,61 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getAnalytics = exports.importLeads = exports.bulkUpdateLeads = exports.bulkDeleteLeads = exports.addNote = exports.deleteLead = exports.updateLead = exports.createLead = exports.getLeadById = exports.getLeads = void 0;
+const mongoose_1 = __importDefault(require("mongoose"));
 const Lead_1 = __importDefault(require("../models/Lead"));
 const db_1 = require("../services/db");
 const leadScorer_1 = require("../services/leadScorer");
+// Normalization Helpers to prevent Mongoose enum validation errors
+const normalizeStatus = (status) => {
+    if (!status)
+        return "New";
+    const s = String(status).trim().toLowerCase();
+    if (s.includes("won"))
+        return "Won";
+    if (s.includes("lost"))
+        return "Lost";
+    if (s.includes("prop"))
+        return "Proposal Sent";
+    if (s.includes("qual"))
+        return "Qualified";
+    if (s.includes("prog"))
+        return "In Progress";
+    if (s.includes("contact"))
+        return "Contacted";
+    return "New";
+};
+const normalizePriority = (priority) => {
+    if (!priority)
+        return "Medium";
+    const p = String(priority).trim().toLowerCase();
+    if (p.includes("urg"))
+        return "Urgent";
+    if (p.includes("high"))
+        return "High";
+    if (p.includes("low"))
+        return "Low";
+    return "Medium";
+};
+const normalizeSource = (source) => {
+    if (!source)
+        return "Website";
+    const src = String(source).trim().toLowerCase();
+    if (src.includes("link"))
+        return "LinkedIn";
+    if (src.includes("insta"))
+        return "Instagram";
+    if (src.includes("google") || src.includes("ad"))
+        return "Google Ads";
+    if (src.includes("ref"))
+        return "Referral";
+    if (src.includes("cold") || src.includes("outreach"))
+        return "Cold Outreach";
+    if (src.includes("event"))
+        return "Event";
+    if (src.includes("web") || src.includes("site"))
+        return "Website";
+    return "Other";
+};
 // GET /api/leads - View Leads List with Advanced Filtering, Search & Backend Pagination
 const getLeads = async (req, res) => {
     try {
@@ -14,7 +66,7 @@ const getLeads = async (req, res) => {
         const pageNum = Math.max(1, Number(page) || 1);
         const limitNum = limit === "all" ? 1000 : Math.max(1, Number(limit) || 10);
         const skip = (pageNum - 1) * limitNum;
-        // Normalize sort field: handles 'latest' and 'oldest' aliases from assignment
+        // Normalize sort field: handles 'latest' and 'oldest' aliases
         let actualSortBy = String(sortBy);
         let actualSortOrder = String(sortOrder).toLowerCase() === "asc" ? "asc" : "desc";
         if (actualSortBy === "latest") {
@@ -26,115 +78,118 @@ const getLeads = async (req, res) => {
             actualSortOrder = "asc";
         }
         if (db_1.isMongoConnected) {
-            const query = {};
-            if (status && status !== "ALL") {
-                query.status = status;
-            }
-            if (source && source !== "ALL") {
-                query.source = source;
-            }
-            if (priority && priority !== "ALL") {
-                query.priority = priority;
-            }
-            if (assignedTo && assignedTo !== "ALL") {
-                query.assignedTo = assignedTo;
-            }
-            if (category && category !== "ALL") {
-                query.leadScoreCategory = category;
-            }
-            if (search) {
-                const searchStr = String(search).trim();
-                query.$or = [
-                    { name: { $regex: searchStr, $options: "i" } },
-                    { email: { $regex: searchStr, $options: "i" } },
-                    { company: { $regex: searchStr, $options: "i" } },
-                    { phone: { $regex: searchStr, $options: "i" } },
-                    { tags: { $in: [new RegExp(searchStr, "i")] } },
-                ];
-            }
-            const sortDirection = actualSortOrder === "asc" ? 1 : -1;
-            const sortObj = { [actualSortBy]: sortDirection };
-            const [leads, total] = await Promise.all([
-                Lead_1.default.find(query).sort(sortObj).skip(skip).limit(limitNum),
-                Lead_1.default.countDocuments(query),
-            ]);
-            const totalPages = Math.ceil(total / limitNum) || 1;
-            return res.json({
-                success: true,
-                leads,
-                totalLeads: total,
-                totalPages,
-                currentPage: pageNum,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
-            });
-        }
-        else {
-            // Memory Store Querying with In-Memory Search, Filter & Pagination
-            let filtered = [...db_1.memoryStore.leads];
-            if (status && status !== "ALL") {
-                filtered = filtered.filter((l) => l.status === status);
-            }
-            if (source && source !== "ALL") {
-                filtered = filtered.filter((l) => l.source === source);
-            }
-            if (priority && priority !== "ALL") {
-                filtered = filtered.filter((l) => l.priority === priority);
-            }
-            if (assignedTo && assignedTo !== "ALL") {
-                filtered = filtered.filter((l) => l.assignedTo === assignedTo);
-            }
-            if (category && category !== "ALL") {
-                filtered = filtered.filter((l) => l.leadScoreCategory === category);
-            }
-            if (search) {
-                const q = String(search).toLowerCase().trim();
-                filtered = filtered.filter((l) => {
-                    const matchName = l.name?.toLowerCase().includes(q);
-                    const matchEmail = l.email?.toLowerCase().includes(q);
-                    const matchCompany = l.company?.toLowerCase().includes(q);
-                    const matchPhone = l.phone?.toLowerCase().includes(q);
-                    const matchTags = Array.isArray(l.tags) && l.tags.some((t) => t.toLowerCase().includes(q));
-                    return matchName || matchEmail || matchCompany || matchPhone || matchTags;
+            try {
+                const query = {};
+                if (status && status !== "ALL") {
+                    query.status = status;
+                }
+                if (source && source !== "ALL") {
+                    query.source = source;
+                }
+                if (priority && priority !== "ALL") {
+                    query.priority = priority;
+                }
+                if (assignedTo && assignedTo !== "ALL") {
+                    query.assignedTo = assignedTo;
+                }
+                if (category && category !== "ALL") {
+                    query.leadScoreCategory = category;
+                }
+                if (search) {
+                    const searchStr = String(search).trim();
+                    query.$or = [
+                        { name: { $regex: searchStr, $options: "i" } },
+                        { email: { $regex: searchStr, $options: "i" } },
+                        { company: { $regex: searchStr, $options: "i" } },
+                        { phone: { $regex: searchStr, $options: "i" } },
+                        { tags: { $in: [new RegExp(searchStr, "i")] } },
+                    ];
+                }
+                const sortDirection = actualSortOrder === "asc" ? 1 : -1;
+                const sortObj = { [actualSortBy]: sortDirection };
+                const [leads, total] = await Promise.all([
+                    Lead_1.default.find(query).sort(sortObj).skip(skip).limit(limitNum),
+                    Lead_1.default.countDocuments(query),
+                ]);
+                const totalPages = Math.ceil(total / limitNum) || 1;
+                return res.json({
+                    success: true,
+                    leads,
+                    totalLeads: total,
+                    totalPages,
+                    currentPage: pageNum,
+                    limit: limitNum,
+                    hasNextPage: pageNum < totalPages,
+                    hasPrevPage: pageNum > 1,
                 });
             }
-            // In-Memory Sorting
-            const isAsc = actualSortOrder === "asc";
-            filtered.sort((a, b) => {
-                let valA = a[actualSortBy];
-                let valB = b[actualSortBy];
-                if (actualSortBy === "createdAt" || actualSortBy === "updatedAt") {
-                    valA = new Date(valA || 0).getTime();
-                    valB = new Date(valB || 0).getTime();
-                }
-                else if (typeof valA === "number" && typeof valB === "number") {
-                    return isAsc ? valA - valB : valB - valA;
-                }
-                else if (typeof valA === "string") {
-                    valA = valA.toLowerCase();
-                    valB = (valB || "").toLowerCase();
-                }
-                if (valA < valB)
-                    return isAsc ? -1 : 1;
-                if (valA > valB)
-                    return isAsc ? 1 : -1;
-                return 0;
-            });
-            const total = filtered.length;
-            const totalPages = Math.ceil(total / limitNum) || 1;
-            const paginatedLeads = filtered.slice(skip, skip + limitNum);
-            return res.json({
-                success: true,
-                leads: paginatedLeads,
-                totalLeads: total,
-                totalPages,
-                currentPage: pageNum,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
+            catch (mongoErr) {
+                console.warn("MongoDB getLeads query error, falling back to local memory store:", mongoErr.message);
+            }
+        }
+        // Memory Store Querying with In-Memory Search, Filter & Pagination
+        let filtered = [...db_1.memoryStore.leads];
+        if (status && status !== "ALL") {
+            filtered = filtered.filter((l) => l.status === status);
+        }
+        if (source && source !== "ALL") {
+            filtered = filtered.filter((l) => l.source === source);
+        }
+        if (priority && priority !== "ALL") {
+            filtered = filtered.filter((l) => l.priority === priority);
+        }
+        if (assignedTo && assignedTo !== "ALL") {
+            filtered = filtered.filter((l) => l.assignedTo === assignedTo);
+        }
+        if (category && category !== "ALL") {
+            filtered = filtered.filter((l) => l.leadScoreCategory === category);
+        }
+        if (search) {
+            const q = String(search).toLowerCase().trim();
+            filtered = filtered.filter((l) => {
+                const matchName = l.name?.toLowerCase().includes(q);
+                const matchEmail = l.email?.toLowerCase().includes(q);
+                const matchCompany = l.company?.toLowerCase().includes(q);
+                const matchPhone = l.phone?.toLowerCase().includes(q);
+                const matchTags = Array.isArray(l.tags) && l.tags.some((t) => t.toLowerCase().includes(q));
+                return matchName || matchEmail || matchCompany || matchPhone || matchTags;
             });
         }
+        // In-Memory Sorting
+        const isAsc = actualSortOrder === "asc";
+        filtered.sort((a, b) => {
+            let valA = a[actualSortBy];
+            let valB = b[actualSortBy];
+            if (actualSortBy === "createdAt" || actualSortBy === "updatedAt") {
+                valA = new Date(valA || 0).getTime();
+                valB = new Date(valB || 0).getTime();
+            }
+            else if (typeof valA === "number" && typeof valB === "number") {
+                return isAsc ? valA - valB : valB - valA;
+            }
+            else if (typeof valA === "string") {
+                valA = valA.toLowerCase();
+                valB = (valB || "").toLowerCase();
+            }
+            if (valA < valB)
+                return isAsc ? -1 : 1;
+            if (valA > valB)
+                return isAsc ? 1 : -1;
+            return 0;
+        });
+        const total = filtered.length;
+        const totalPages = Math.ceil(total / limitNum) || 1;
+        const paginatedLeads = filtered.slice(skip, skip + limitNum);
+        return res.json({
+            success: true,
+            leads: paginatedLeads,
+            totalLeads: total,
+            totalPages,
+            currentPage: pageNum,
+            limit: limitNum,
+            hasNextPage: pageNum < totalPages,
+            hasPrevPage: pageNum > 1,
+        });
     }
     catch (error) {
         console.error("Get Leads Error:", error);
@@ -147,10 +202,15 @@ const getLeadById = async (req, res) => {
     try {
         const { id } = req.params;
         let lead = null;
-        if (db_1.isMongoConnected) {
-            lead = await Lead_1.default.findById(id);
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(id)) {
+            try {
+                lead = await Lead_1.default.findById(id);
+            }
+            catch (err) {
+                console.warn("MongoDB getLeadById error:", err.message);
+            }
         }
-        else {
+        if (!lead) {
             lead = db_1.memoryStore.leads.find((l) => String(l._id) === String(id));
         }
         if (!lead) {
@@ -178,7 +238,7 @@ const createLead = async (req, res) => {
         }
         const scoring = (0, leadScorer_1.calculateLeadScore)(data);
         const initialNotes = Array.isArray(data.notes) ? [...data.notes] : [];
-        const creatorName = req.user?.name || "Sales Rep";
+        const creatorName = req.user?.name || "Rahul Sharma";
         initialNotes.push({
             author: creatorName,
             content: `Lead created in CRM via ${data.source || "Website"}.`,
@@ -193,9 +253,9 @@ const createLead = async (req, res) => {
             jobTitle: data.jobTitle || "Lead Contact",
             dealValue: Number(data.dealValue || 0),
             currency: data.currency || "USD",
-            status: data.status || "New",
-            priority: data.priority || "Medium",
-            source: data.source || "Website",
+            status: normalizeStatus(data.status),
+            priority: normalizePriority(data.priority),
+            source: normalizeSource(data.source),
             assignedTo: data.assignedTo || creatorName,
             leadScore: scoring.score,
             leadScoreCategory: scoring.category,
@@ -204,11 +264,16 @@ const createLead = async (req, res) => {
             tags: Array.isArray(data.tags) ? data.tags : [],
             notes: initialNotes,
         };
-        let createdLead;
+        let createdLead = null;
         if (db_1.isMongoConnected) {
-            createdLead = await Lead_1.default.create(leadPayload);
+            try {
+                createdLead = await Lead_1.default.create(leadPayload);
+            }
+            catch (err) {
+                console.warn("MongoDB createLead error, falling back to local store:", err.message);
+            }
         }
-        else {
+        if (!createdLead) {
             createdLead = {
                 _id: `lead_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
                 ...leadPayload,
@@ -220,6 +285,14 @@ const createLead = async (req, res) => {
                 updatedAt: new Date(),
             };
             db_1.memoryStore.leads.unshift(createdLead);
+        }
+        else {
+            db_1.memoryStore.leads.unshift({
+                _id: String(createdLead._id),
+                ...leadPayload,
+                createdAt: createdLead.createdAt,
+                updatedAt: createdLead.updatedAt,
+            });
         }
         return res.status(201).json(createdLead);
     }
@@ -234,11 +307,22 @@ const updateLead = async (req, res) => {
     try {
         const { id } = req.params;
         const updates = { ...req.body };
+        if (updates.status)
+            updates.status = normalizeStatus(updates.status);
+        if (updates.priority)
+            updates.priority = normalizePriority(updates.priority);
+        if (updates.source)
+            updates.source = normalizeSource(updates.source);
         let existingLead = null;
-        if (db_1.isMongoConnected) {
-            existingLead = await Lead_1.default.findById(id);
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(id)) {
+            try {
+                existingLead = await Lead_1.default.findById(id);
+            }
+            catch (err) {
+                console.warn("MongoDB findById for update error:", err.message);
+            }
         }
-        else {
+        if (!existingLead) {
             existingLead = db_1.memoryStore.leads.find((l) => String(l._id) === String(id));
         }
         if (!existingLead) {
@@ -267,19 +351,27 @@ const updateLead = async (req, res) => {
         updates.leadScoreCategory = scoring.category;
         updates.scoreFactors = scoring.factors;
         updates.updatedAt = new Date();
-        let updatedResult;
-        if (db_1.isMongoConnected) {
-            updatedResult = await Lead_1.default.findByIdAndUpdate(id, updates, { new: true });
-        }
-        else {
-            const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
-            if (idx !== -1) {
-                db_1.memoryStore.leads[idx] = {
-                    ...db_1.memoryStore.leads[idx],
-                    ...updates,
-                };
-                updatedResult = db_1.memoryStore.leads[idx];
+        let updatedResult = null;
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(id)) {
+            try {
+                updatedResult = await Lead_1.default.findByIdAndUpdate(id, updates, { new: true });
             }
+            catch (err) {
+                console.warn("MongoDB findByIdAndUpdate error:", err.message);
+            }
+        }
+        // Always update memoryStore as well
+        const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
+        if (idx !== -1) {
+            db_1.memoryStore.leads[idx] = {
+                ...db_1.memoryStore.leads[idx],
+                ...updates,
+            };
+            if (!updatedResult)
+                updatedResult = db_1.memoryStore.leads[idx];
+        }
+        if (!updatedResult) {
+            return res.status(404).json({ success: false, message: "Lead not found." });
         }
         return res.json(updatedResult);
     }
@@ -293,18 +385,24 @@ exports.updateLead = updateLead;
 const deleteLead = async (req, res) => {
     try {
         const { id } = req.params;
-        if (db_1.isMongoConnected) {
-            const result = await Lead_1.default.findByIdAndDelete(id);
-            if (!result) {
-                return res.status(404).json({ success: false, message: "Lead not found." });
+        let deleted = false;
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(id)) {
+            try {
+                const result = await Lead_1.default.findByIdAndDelete(id);
+                if (result)
+                    deleted = true;
+            }
+            catch (err) {
+                console.warn("MongoDB delete error:", err.message);
             }
         }
-        else {
-            const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
-            if (idx === -1) {
-                return res.status(404).json({ success: false, message: "Lead not found." });
-            }
+        const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
+        if (idx !== -1) {
             db_1.memoryStore.leads.splice(idx, 1);
+            deleted = true;
+        }
+        if (!deleted) {
+            return res.status(404).json({ success: false, message: "Lead not found." });
         }
         return res.json({ success: true, message: "Lead deleted successfully", id });
     }
@@ -322,30 +420,33 @@ const addNote = async (req, res) => {
         if (!content) {
             return res.status(400).json({ success: false, message: "Note content is required." });
         }
-        const author = req.user?.name || "Sales Rep";
+        const author = req.user?.name || "Rahul Sharma";
         const newNote = {
             author,
             content,
             type: type,
             createdAt: new Date(),
         };
-        let updatedLead;
-        if (db_1.isMongoConnected) {
-            const lead = await Lead_1.default.findById(id);
-            if (!lead)
-                return res.status(404).json({ success: false, message: "Lead not found." });
-            lead.notes.push(newNote);
-            const scoring = (0, leadScorer_1.calculateLeadScore)(lead);
-            lead.leadScore = scoring.score;
-            lead.leadScoreCategory = scoring.category;
-            lead.scoreFactors = scoring.factors;
-            await lead.save();
-            updatedLead = lead;
+        let updatedLead = null;
+        if (db_1.isMongoConnected && mongoose_1.default.isValidObjectId(id)) {
+            try {
+                const lead = await Lead_1.default.findById(id);
+                if (lead) {
+                    lead.notes.push(newNote);
+                    const scoring = (0, leadScorer_1.calculateLeadScore)(lead);
+                    lead.leadScore = scoring.score;
+                    lead.leadScoreCategory = scoring.category;
+                    lead.scoreFactors = scoring.factors;
+                    await lead.save();
+                    updatedLead = lead;
+                }
+            }
+            catch (err) {
+                console.warn("MongoDB addNote error:", err.message);
+            }
         }
-        else {
-            const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
-            if (idx === -1)
-                return res.status(404).json({ success: false, message: "Lead not found." });
+        const idx = db_1.memoryStore.leads.findIndex((l) => String(l._id) === String(id));
+        if (idx !== -1) {
             const lead = db_1.memoryStore.leads[idx];
             const noteItem = { _id: `note_${Date.now()}`, ...newNote };
             lead.notes = [...(lead.notes || []), noteItem];
@@ -354,7 +455,11 @@ const addNote = async (req, res) => {
             lead.leadScoreCategory = scoring.category;
             lead.scoreFactors = scoring.factors;
             lead.updatedAt = new Date();
-            updatedLead = lead;
+            if (!updatedLead)
+                updatedLead = lead;
+        }
+        if (!updatedLead) {
+            return res.status(404).json({ success: false, message: "Lead not found." });
         }
         return res.json(updatedLead);
     }
@@ -372,11 +477,17 @@ const bulkDeleteLeads = async (req, res) => {
             return res.status(400).json({ success: false, message: "Array of lead IDs is required." });
         }
         if (db_1.isMongoConnected) {
-            await Lead_1.default.deleteMany({ _id: { $in: ids } });
+            try {
+                const validMongoIds = ids.filter((id) => mongoose_1.default.isValidObjectId(id));
+                if (validMongoIds.length > 0) {
+                    await Lead_1.default.deleteMany({ _id: { $in: validMongoIds } });
+                }
+            }
+            catch (err) {
+                console.warn("MongoDB bulkDelete error:", err.message);
+            }
         }
-        else {
-            db_1.memoryStore.leads = db_1.memoryStore.leads.filter((l) => !ids.map(String).includes(String(l._id)));
-        }
+        db_1.memoryStore.leads = db_1.memoryStore.leads.filter((l) => !ids.map(String).includes(String(l._id)));
         return res.json({ success: true, message: `${ids.length} leads deleted successfully.` });
     }
     catch (error) {
@@ -392,17 +503,27 @@ const bulkUpdateLeads = async (req, res) => {
         if (!Array.isArray(ids) || ids.length === 0 || !updates) {
             return res.status(400).json({ success: false, message: "IDs and update fields are required." });
         }
+        if (updates.status)
+            updates.status = normalizeStatus(updates.status);
+        if (updates.priority)
+            updates.priority = normalizePriority(updates.priority);
         if (db_1.isMongoConnected) {
-            await Lead_1.default.updateMany({ _id: { $in: ids } }, { $set: updates });
-        }
-        else {
-            db_1.memoryStore.leads = db_1.memoryStore.leads.map((lead) => {
-                if (ids.map(String).includes(String(lead._id))) {
-                    return { ...lead, ...updates, updatedAt: new Date() };
+            try {
+                const validMongoIds = ids.filter((id) => mongoose_1.default.isValidObjectId(id));
+                if (validMongoIds.length > 0) {
+                    await Lead_1.default.updateMany({ _id: { $in: validMongoIds } }, { $set: updates });
                 }
-                return lead;
-            });
+            }
+            catch (err) {
+                console.warn("MongoDB bulkUpdate error:", err.message);
+            }
         }
+        db_1.memoryStore.leads = db_1.memoryStore.leads.map((lead) => {
+            if (ids.map(String).includes(String(lead._id))) {
+                return { ...lead, ...updates, updatedAt: new Date() };
+            }
+            return lead;
+        });
         return res.json({ success: true, message: `${ids.length} leads updated successfully.` });
     }
     catch (error) {
@@ -425,16 +546,16 @@ const importLeads = async (req, res) => {
                 continue;
             const scoring = (0, leadScorer_1.calculateLeadScore)(item);
             const leadObj = {
-                name: item.name.trim(),
-                email: item.email.toLowerCase().trim(),
+                name: String(item.name).trim(),
+                email: String(item.email).toLowerCase().trim(),
                 phone: item.phone || "",
                 company: item.company || "Company",
                 jobTitle: item.jobTitle || "Contact",
                 dealValue: Number(item.dealValue || 0),
                 currency: item.currency || "USD",
-                status: item.status || "New",
-                priority: item.priority || "Medium",
-                source: item.source || "Website",
+                status: normalizeStatus(item.status),
+                priority: normalizePriority(item.priority),
+                source: normalizeSource(item.source),
                 assignedTo: item.assignedTo || author,
                 leadScore: scoring.score,
                 leadScoreCategory: scoring.category,
@@ -454,15 +575,18 @@ const importLeads = async (req, res) => {
             processedLeads.push(leadObj);
         }
         if (db_1.isMongoConnected) {
-            await Lead_1.default.insertMany(processedLeads);
+            try {
+                await Lead_1.default.insertMany(processedLeads);
+            }
+            catch (err) {
+                console.warn("MongoDB insertMany error, adding to local store:", err.message);
+            }
         }
-        else {
-            const timestamped = processedLeads.map((l, i) => ({
-                _id: `lead_imp_${Date.now()}_${i}`,
-                ...l,
-            }));
-            db_1.memoryStore.leads.unshift(...timestamped);
-        }
+        const timestamped = processedLeads.map((l, i) => ({
+            _id: `lead_imp_${Date.now()}_${i}`,
+            ...l,
+        }));
+        db_1.memoryStore.leads.unshift(...timestamped);
         return res.status(201).json({
             success: true,
             message: `Successfully imported ${processedLeads.length} leads.`,
@@ -480,9 +604,19 @@ const getAnalytics = async (_req, res) => {
     try {
         let allLeads = [];
         if (db_1.isMongoConnected) {
-            allLeads = await Lead_1.default.find({});
+            try {
+                allLeads = await Lead_1.default.find({});
+            }
+            catch (err) {
+                console.warn("MongoDB getAnalytics query error, using local store:", err.message);
+                allLeads = db_1.memoryStore.leads;
+            }
         }
         else {
+            allLeads = db_1.memoryStore.leads;
+        }
+        // If mongo returned empty leads but memory has leads, use memory store
+        if (allLeads.length === 0 && db_1.memoryStore.leads.length > 0) {
             allLeads = db_1.memoryStore.leads;
         }
         const totalLeads = allLeads.length;
@@ -526,15 +660,16 @@ const getAnalytics = async (_req, res) => {
             else if (lead.status === "Lost") {
                 lostValue += val;
             }
-            if (lead.leadScoreCategory === "Hot" || lead.leadScore >= 75) {
+            if (lead.leadScoreCategory === "Hot" || (lead.leadScore && lead.leadScore >= 75)) {
                 hotLeadsCount++;
             }
             // Status breakdown
-            if (!statusCounts[lead.status]) {
-                statusCounts[lead.status] = { count: 0, value: 0 };
+            const st = lead.status || "New";
+            if (!statusCounts[st]) {
+                statusCounts[st] = { count: 0, value: 0 };
             }
-            statusCounts[lead.status].count++;
-            statusCounts[lead.status].value += val;
+            statusCounts[st].count++;
+            statusCounts[st].value += val;
             // Source breakdown
             const src = lead.source || "Website";
             sourceCounts[src] = (sourceCounts[src] || 0) + 1;

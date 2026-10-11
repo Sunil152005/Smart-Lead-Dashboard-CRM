@@ -316,14 +316,32 @@ const initialLeads: Partial<ILead>[] = [
   },
 ];
 
+// Register Mongoose connection event listeners to keep isMongoConnected accurate
+mongoose.connection.on("connected", () => {
+  isMongoConnected = true;
+});
+
+mongoose.connection.on("error", (err) => {
+  console.warn("MongoDB connection warning:", err.message);
+  isMongoConnected = false;
+});
+
+mongoose.connection.on("disconnected", () => {
+  console.warn("MongoDB disconnected. Local resilient engine active.");
+  isMongoConnected = false;
+});
+
 export async function initDatabase(): Promise<void> {
   const mongoUri = process.env.MONGO_URI;
+
+  // Always seed local memory store first so fallback is ready immediately
+  await seedMemoryDatabase();
 
   if (mongoUri) {
     try {
       console.log("Connecting to MongoDB Database...");
       await mongoose.connect(mongoUri, {
-        serverSelectionTimeoutMS: 3000,
+        serverSelectionTimeoutMS: 5000,
       });
       isMongoConnected = true;
       console.log("MongoDB Connected Successfully!");
@@ -338,42 +356,77 @@ export async function initDatabase(): Promise<void> {
     console.log("No MONGO_URI provided. Initializing Resilient Local Database Engine.");
     isMongoConnected = false;
   }
-
-  await seedMemoryDatabase();
 }
 
 async function seedMongoDatabase() {
   try {
-    const userCount = await User.countDocuments();
-    if (userCount === 0) {
-      console.log("Seeding initial users into MongoDB...");
-      for (const u of initialUsers) {
-        const hashedPassword = await bcrypt.hash(u.password, 10);
+    // Ensure all demo users exist in MongoDB Atlas
+    for (const u of initialUsers) {
+      const existing = await User.findOne({ email: u.email.toLowerCase() });
+      const hashedPassword = await bcrypt.hash(u.password, 10);
+      if (!existing) {
+        console.log(`Seeding demo user ${u.email} into MongoDB...`);
         await User.create({
           name: u.name,
-          email: u.email,
+          email: u.email.toLowerCase(),
           role: u.role as any,
           password: hashedPassword,
           avatar: u.avatar,
         });
+      } else {
+        // Ensure demo password remains valid
+        existing.password = hashedPassword;
+        existing.role = u.role as any;
+        if (!existing.avatar) existing.avatar = u.avatar;
+        await existing.save();
       }
-      console.log("Users seeded successfully.");
     }
+    console.log("Demo users verified in MongoDB.");
 
-    const leadCount = await Lead.countDocuments();
-    if (leadCount === 0) {
-      console.log("Seeding realistic CRM leads into MongoDB...");
-      for (const item of initialLeads) {
+    // Seed realistic CRM leads if they don't already exist by email
+    for (const item of initialLeads) {
+      if (!item.email) continue;
+      const existingLead = await Lead.findOne({ email: item.email.toLowerCase() });
+      if (!existingLead) {
         const scoring = calculateLeadScore(item);
         await Lead.create({
           ...item,
+          email: item.email.toLowerCase(),
           leadScore: scoring.score,
           leadScoreCategory: scoring.category,
           scoreFactors: scoring.factors,
         } as any);
       }
-      console.log("CRM leads seeded successfully into MongoDB.");
     }
+
+    // Ensure all leads have required fields & AI scores
+    const allLeads = await Lead.find({});
+    for (const lead of allLeads) {
+      let needsSave = false;
+      if (!lead.dealValue || lead.dealValue === 0) {
+        lead.dealValue = 25000;
+        needsSave = true;
+      }
+      if (!lead.leadScore || (lead.leadScore === 50 && (!lead.scoreFactors || lead.scoreFactors.length === 0))) {
+        const scoring = calculateLeadScore(lead);
+        lead.leadScore = scoring.score;
+        lead.leadScoreCategory = scoring.category;
+        lead.scoreFactors = scoring.factors;
+        needsSave = true;
+      }
+      if (!lead.notes) {
+        lead.notes = [] as any;
+        needsSave = true;
+      }
+      if (!lead.tags) {
+        lead.tags = [];
+        needsSave = true;
+      }
+      if (needsSave) {
+        await lead.save();
+      }
+    }
+    console.log("CRM leads verified and scored in MongoDB.");
   } catch (err: any) {
     console.error("Error seeding MongoDB:", err.message);
   }

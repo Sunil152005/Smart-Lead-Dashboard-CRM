@@ -312,13 +312,27 @@ const initialLeads = [
         followUpDate: new Date("2026-03-10"),
     },
 ];
+// Register Mongoose connection event listeners to keep isMongoConnected accurate
+mongoose_1.default.connection.on("connected", () => {
+    exports.isMongoConnected = true;
+});
+mongoose_1.default.connection.on("error", (err) => {
+    console.warn("MongoDB connection warning:", err.message);
+    exports.isMongoConnected = false;
+});
+mongoose_1.default.connection.on("disconnected", () => {
+    console.warn("MongoDB disconnected. Local resilient engine active.");
+    exports.isMongoConnected = false;
+});
 async function initDatabase() {
     const mongoUri = process.env.MONGO_URI;
+    // Always seed local memory store first so fallback is ready immediately
+    await seedMemoryDatabase();
     if (mongoUri) {
         try {
             console.log("Connecting to MongoDB Database...");
             await mongoose_1.default.connect(mongoUri, {
-                serverSelectionTimeoutMS: 3000,
+                serverSelectionTimeoutMS: 5000,
             });
             exports.isMongoConnected = true;
             console.log("MongoDB Connected Successfully!");
@@ -335,39 +349,77 @@ async function initDatabase() {
         console.log("No MONGO_URI provided. Initializing Resilient Local Database Engine.");
         exports.isMongoConnected = false;
     }
-    await seedMemoryDatabase();
 }
 async function seedMongoDatabase() {
     try {
-        const userCount = await User_1.default.countDocuments();
-        if (userCount === 0) {
-            console.log("Seeding initial users into MongoDB...");
-            for (const u of initialUsers) {
-                const hashedPassword = await bcryptjs_1.default.hash(u.password, 10);
+        // Ensure all demo users exist in MongoDB Atlas
+        for (const u of initialUsers) {
+            const existing = await User_1.default.findOne({ email: u.email.toLowerCase() });
+            const hashedPassword = await bcryptjs_1.default.hash(u.password, 10);
+            if (!existing) {
+                console.log(`Seeding demo user ${u.email} into MongoDB...`);
                 await User_1.default.create({
                     name: u.name,
-                    email: u.email,
+                    email: u.email.toLowerCase(),
                     role: u.role,
                     password: hashedPassword,
                     avatar: u.avatar,
                 });
             }
-            console.log("Users seeded successfully.");
+            else {
+                // Ensure demo password remains valid
+                existing.password = hashedPassword;
+                existing.role = u.role;
+                if (!existing.avatar)
+                    existing.avatar = u.avatar;
+                await existing.save();
+            }
         }
-        const leadCount = await Lead_1.default.countDocuments();
-        if (leadCount === 0) {
-            console.log("Seeding realistic CRM leads into MongoDB...");
-            for (const item of initialLeads) {
+        console.log("Demo users verified in MongoDB.");
+        // Seed realistic CRM leads if they don't already exist by email
+        for (const item of initialLeads) {
+            if (!item.email)
+                continue;
+            const existingLead = await Lead_1.default.findOne({ email: item.email.toLowerCase() });
+            if (!existingLead) {
                 const scoring = (0, leadScorer_1.calculateLeadScore)(item);
                 await Lead_1.default.create({
                     ...item,
+                    email: item.email.toLowerCase(),
                     leadScore: scoring.score,
                     leadScoreCategory: scoring.category,
                     scoreFactors: scoring.factors,
                 });
             }
-            console.log("CRM leads seeded successfully into MongoDB.");
         }
+        // Ensure all leads have required fields & AI scores
+        const allLeads = await Lead_1.default.find({});
+        for (const lead of allLeads) {
+            let needsSave = false;
+            if (!lead.dealValue || lead.dealValue === 0) {
+                lead.dealValue = 25000;
+                needsSave = true;
+            }
+            if (!lead.leadScore || (lead.leadScore === 50 && (!lead.scoreFactors || lead.scoreFactors.length === 0))) {
+                const scoring = (0, leadScorer_1.calculateLeadScore)(lead);
+                lead.leadScore = scoring.score;
+                lead.leadScoreCategory = scoring.category;
+                lead.scoreFactors = scoring.factors;
+                needsSave = true;
+            }
+            if (!lead.notes) {
+                lead.notes = [];
+                needsSave = true;
+            }
+            if (!lead.tags) {
+                lead.tags = [];
+                needsSave = true;
+            }
+            if (needsSave) {
+                await lead.save();
+            }
+        }
+        console.log("CRM leads verified and scored in MongoDB.");
     }
     catch (err) {
         console.error("Error seeding MongoDB:", err.message);

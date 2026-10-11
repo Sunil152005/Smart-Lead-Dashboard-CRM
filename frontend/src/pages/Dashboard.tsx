@@ -154,9 +154,13 @@ export const Dashboard: React.FC = () => {
       setLeads(res.data.leads || []);
       setTotalPages(res.data.totalPages || 1);
       setTotalLeads(res.data.totalLeads || 0);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Fetch Leads Error:", error);
-      showToast("Failed to load leads from server.", "error");
+      const msg =
+        error.code === "ERR_NETWORK" || !error.response
+          ? "Cannot connect to backend server. Please verify backend is running on port 5000."
+          : error.response?.data?.message || "Failed to load leads from server.";
+      showToast(msg, "error");
     } finally {
       setLoading(false);
     }
@@ -395,8 +399,12 @@ export const Dashboard: React.FC = () => {
       }
       showToast(`Switched account to ${targetRole === "ADMIN" ? "Rahul (Admin)" : "Priya (Sales Rep)"}!`, "info");
       window.location.reload();
-    } catch {
-      showToast("Failed to switch role.", "error");
+    } catch (error: any) {
+      const msg =
+        error.code === "ERR_NETWORK" || !error.response
+          ? "Cannot connect to backend server."
+          : error.response?.data?.message || "Failed to switch role.";
+      showToast(msg, "error");
     }
   };
 

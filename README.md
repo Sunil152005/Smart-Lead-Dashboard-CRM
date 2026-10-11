@@ -240,72 +240,6 @@ The original project documentation provides the following demo accounts:
 | Sales Representative | `priya@sales.com` | `123456` |
 
 Use these credentials only if the demo accounts are available in your current application environment. Change or remove publicly documented demo credentials if they provide access to a shared or production database.
-<<<<<<< HEAD
-
-## API Documentation
-
-### Authentication Endpoints
-
-Base path: `/api/auth`
-
-| Method | Endpoint | Description | Authentication |
-|---|---|---|---|
-| POST | `/api/auth/register` | Register a user | No |
-| POST | `/api/auth/login` | Authenticate a user | No |
-| GET | `/api/auth/me` | Retrieve the current user profile | Yes |
-
-### Lead Management Endpoints
-
-Base path: `/api/leads`
-
-| Method | Endpoint | Description | Authentication |
-|---|---|---|---|
-| GET | `/api/leads` | Retrieve leads with search, filters, sorting, and pagination | Yes |
-| GET | `/api/leads/:id` | Retrieve a specific lead | Yes |
-| POST | `/api/leads` | Create a lead | Yes |
-| PUT | `/api/leads/:id` | Update a lead | Yes |
-| DELETE | `/api/leads/:id` | Delete a lead | Admin |
-| POST | `/api/leads/:id/notes` | Add notes or activity records | Yes |
-| GET | `/api/leads/analytics` | Retrieve analytics and KPI summaries | Yes |
-| POST | `/api/leads/import` | Import leads from CSV | Yes |
-| POST | `/api/leads/bulk-delete` | Delete multiple leads | Admin |
-| POST | `/api/leads/bulk-update` | Update multiple lead stages | Yes |
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|---|---|
-| `/` or `Ctrl + K` | Focus the search field |
-| `N` | Open the new lead form |
-| `Esc` | Close an open modal or drawer |
-
-## Security Considerations
-
-- Passwords are hashed using bcryptjs.
-- JWT authentication protects restricted routes.
-- Role-based authorization limits sensitive operations.
-- Environment variables should be used for database credentials and secrets.
-- Never commit `.env` files, database credentials, JWT secrets, or private access tokens.
-- Demo credentials should not be reused in production environments.
-
-## Future Improvements
-
-Potential enhancements include:
-
-- Email notifications for lead updates.
-- Advanced reporting and analytics.
-- Lead assignment and team collaboration.
-- Automated follow-up reminders.
-- Integration with external communication tools.
-- Expanded automated testing and monitoring.
-
-## Author
-
-**Sunil Jadhav**
-
-- GitHub: [@Sunil152005](https://github.com/Sunil152005)
-- Repository: [Smart Lead Dashboard](https://github.com/Sunil152005/Smart_Lead_Dashboard)
-=======
 
 ## API Documentation
 
@@ -372,3 +306,4 @@ Potential enhancements include:
 - Repository: [Smart Lead Dashboard](https://github.com/Sunil152005/Smart_Lead_Dashboard)
 
 ---
+
