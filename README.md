@@ -372,6 +372,3 @@ Potential enhancements include:
 - Repository: [Smart Lead Dashboard](https://github.com/Sunil152005/Smart_Lead_Dashboard)
 
 ---
->>>>>>> c0200575ecd064cc6ff96b8af34c0fab5c28b41f
-
-If you find this project useful, consider giving the repository a star.
